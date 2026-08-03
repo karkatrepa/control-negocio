@@ -1,31 +1,27 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
+import sqlite3
 
 # Configuración de la página
 st.set_page_config(page_title="Pescados Medina", page_icon="🐟", layout="centered")
 
 st.title("🐟 Pescados Medina - Control de Caja")
 
-# --- CONEXIÓN A GOOGLE SHEETS ---
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    df_compras = conn.read(worksheet="compras", ttl=0)
-    df_ventas = conn.read(worksheet="ventas", ttl=0)
-    
-    df_compras = df_compras.dropna(how="all")
-    df_ventas = df_ventas.dropna(how="all")
-    
-    if df_compras.empty:
-        df_compras = pd.DataFrame(columns=["Fecha", "Insumo", "Precio", "Unidades", "Total"])
-    if df_ventas.empty:
-        df_ventas = pd.DataFrame(columns=["Fecha", "Producto", "Precio", "Unidades", "Total"])
+# --- CONEXIÓN A BASE DE DATOS LOCAL ---
+def init_db():
+    conn = sqlite3.connect('negocio.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS compras (fecha TEXT, insumo TEXT, precio REAL, unidades INTEGER, total REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS ventas (fecha TEXT, producto TEXT, precio REAL, unidades INTEGER, total REAL)''')
+    conn.commit()
+    return conn
 
-except Exception as e:
-    st.error(f"Error al conectar con Google Sheets: {e}")
-    st.stop()
+conn = init_db()
+
+# Cargar datos en DataFrames
+df_compras = pd.read_sql("SELECT * FROM compras", conn)
+df_ventas = pd.read_sql("SELECT * FROM ventas", conn)
 
 # Menú lateral
 menu = st.sidebar.selectbox("Menú", ["Resumen", "Registrar Compra", "Registrar Venta", "Ver Registros"])
@@ -34,8 +30,8 @@ menu = st.sidebar.selectbox("Menú", ["Resumen", "Registrar Compra", "Registrar 
 if menu == "Resumen":
     st.header("📊 Resumen del Negocio")
     
-    total_compras = pd.to_numeric(df_compras["Total"]).sum() if not df_compras.empty and "Total" in df_compras else 0.0
-    total_ventas = pd.to_numeric(df_ventas["Total"]).sum() if not df_ventas.empty and "Total" in df_ventas else 0.0
+    total_compras = df_compras["total"].sum() if not df_compras.empty else 0.0
+    total_ventas = df_ventas["total"].sum() if not df_ventas.empty else 0.0
     beneficio_neto = total_ventas - total_compras
     
     col1, col2, col3 = st.columns(3)
@@ -52,24 +48,17 @@ elif menu == "Registrar Compra":
         precio = st.number_input("Precio por unidad (€)", min_value=0.0, step=0.5)
         unidades = st.number_input("Unidades / Cantidad", min_value=1, step=1)
         
-        submitted = st.form_submit_button("Guardar Compra en Google Sheets")
+        submitted = st.form_submit_button("Guardar Compra")
         
         if submitted and insumo:
             total_gasto = precio * unidades
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            nueva_fila = pd.DataFrame([{
-                "Fecha": fecha_actual,
-                "Insumo": insumo,
-                "Precio": precio,
-                "Unidades": unidades,
-                "Total": total_gasto
-            }])
+            c = conn.cursor()
+            c.execute("INSERT INTO compras VALUES (?, ?, ?, ?, ?)", (fecha_actual, insumo, precio, unidades, total_gasto))
+            conn.commit()
             
-            df_actualizado = pd.concat([df_compras, nueva_fila], ignore_index=True)
-            conn.update(worksheet="compras", data=df_actualizado)
-            
-            st.success(f"¡Compra de {insumo} guardada en tu Google Sheet! Total: {total_gasto:.2f} €")
+            st.success(f"¡Compra de {insumo} guardada! Total: {total_gasto:.2f} €")
             st.rerun()
 
 # --- SECCIÓN 3: REGISTRAR VENTA ---
@@ -81,32 +70,38 @@ elif menu == "Registrar Venta":
         precio_v = st.number_input("Precio de venta (€)", min_value=0.0, step=0.5)
         unidades_v = st.number_input("Cantidad vendida", min_value=1, step=1)
         
-        submitted_v = st.form_submit_button("Guardar Venta en Google Sheets")
+        submitted_v = st.form_submit_button("Guardar Venta")
         
         if submitted_v and producto:
             total_ingreso = precio_v * unidades_v
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            nueva_fila_v = pd.DataFrame([{
-                "Fecha": fecha_actual,
-                "Producto": producto,
-                "Precio": precio_v,
-                "Unidades": unidades_v,
-                "Total": total_ingreso
-            }])
+            c = conn.cursor()
+            c.execute("INSERT INTO ventas VALUES (?, ?, ?, ?, ?)", (fecha_actual, producto, precio_v, unidades_v, total_ingreso))
+            conn.commit()
             
-            df_ventas_actualizado = pd.concat([df_ventas, nueva_fila_v], ignore_index=True)
-            conn.update(worksheet="ventas", data=df_ventas_actualizado)
-            
-            st.success(f"¡Venta de {producto} registrada en tu Google Sheet! Total: {total_ingreso:.2f} €")
+            st.success(f"¡Venta de {producto} registrada! Total: {total_ingreso:.2f} €")
             st.rerun()
 
-# --- SECCIÓN 4: VER REGISTROS ---
+# --- SECCIÓN 4: VER REGISTROS Y DESCARGA ---
 elif menu == "Ver Registros":
-    st.header("📋 Historial de Movimientos")
+    st.header("📋 Historial de Movimientos y Copia de Seguridad")
     
     st.subheader("Compras realizadas")
     st.dataframe(df_compras)
     
     st.subheader("Ventas realizadas")
     st.dataframe(df_ventas)
+    
+    st.markdown("---")
+    st.subheader("💾 Copia de Seguridad")
+    st.write("Pulsa aquí para descargar tus datos actualizados y guardarlos en tu dispositivo:")
+    
+    # Botones de descarga directa en CSV / Excel
+    if not df_compras.empty:
+        csv_compras = df_compras.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Descargar Compras (CSV)", csv_compras, "compras.csv", "text/csv")
+        
+    if not df_ventas.empty:
+        csv_ventas = df_ventas.to_csv(index=False).encode('utf-8')
+        st.download_button("📤 Descargar Ventas (CSV)", csv_ventas, "ventas.csv", "text/csv")

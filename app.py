@@ -84,8 +84,9 @@ elif menu == "Registrar Venta":
             st.rerun()
 
 # --- SECCIÓN 4: VER REGISTROS Y DESCARGA ---
+# --- SECCIÓN 4: VER REGISTROS Y CORRECCIONES ---
 elif menu == "Ver Registros":
-    st.header("📋 Historial de Movimientos y Copia de Seguridad")
+    st.header("📋 Historial de Movimientos")
     
     st.subheader("Compras realizadas")
     st.dataframe(df_compras)
@@ -94,10 +95,40 @@ elif menu == "Ver Registros":
     st.dataframe(df_ventas)
     
     st.markdown("---")
-    st.subheader("💾 Copia de Seguridad")
-    st.write("Pulsa aquí para descargar tus datos actualizados y guardarlos en tu dispositivo:")
+    st.subheader("🛠️ Corregir o Reiniciar Registros")
     
-    # Botones de descarga directa en CSV / Excel
+    # Botón para borrar la última venta si te has equivocado
+    if not df_ventas.empty:
+        if st.button("🗑️ Borrar última venta registrada"):
+            c = conn.cursor()
+            # Borra la última fila introducida en la tabla de ventas
+            c.execute("DELETE FROM ventas WHERE rowid = (SELECT MAX(rowid) FROM ventas)")
+            conn.commit()
+            st.warning("Se ha borrado la última venta registrada.")
+            st.rerun()
+
+    # Botón para borrar la última compra
+    if not df_compras.empty:
+        if st.button("🗑️ Borrar última compra registrada"):
+            c = conn.cursor()
+            c.execute("DELETE FROM compras WHERE rowid = (SELECT MAX(rowid) FROM compras)")
+            conn.commit()
+            st.warning("Se ha borrado la última compra registrada.")
+            st.rerun()
+
+    st.markdown("---")
+    # Zona de peligro / Reinicio total
+    if st.checkbox("⚠️ Activar opción de borrado total"):
+        if st.button("🔴 Borrar absolutamente todo y empezar de cero"):
+            c = conn.cursor()
+            c.execute("DELETE FROM compras")
+            c.execute("DELETE FROM ventas")
+            conn.commit()
+            st.success("Se han borrado todos los registros. La base de datos está limpia.")
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("💾 Copia de Seguridad")
     if not df_compras.empty:
         csv_compras = df_compras.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Descargar Compras (CSV)", csv_compras, "compras.csv", "text/csv")

@@ -1,33 +1,30 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
 # Configuración de la página
 st.set_page_config(page_title="Pescados Medina", page_icon="🐟", layout="centered")
 
 st.title("🐟 Pescados Medina - Control de Caja")
 
-# --- CONEXIÓN DIRECTA A GOOGLE SHEETS ---
-# Usamos el conector nativo de Streamlit
+# --- CONEXIÓN A GOOGLE SHEETS ---
 try:
-    conn = st.connection("gsheets", type="gsheets")
+    conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # Leemos las pestañas de tu Google Sheet (asegúrate de que se llaman exactamente así)
     df_compras = conn.read(worksheet="compras", ttl=0)
     df_ventas = conn.read(worksheet="ventas", ttl=0)
     
-    # Limpiamos posibles filas vacías que lea Google Sheets
     df_compras = df_compras.dropna(how="all")
     df_ventas = df_ventas.dropna(how="all")
     
-    # Aseguramos columnas por si la hoja está vacía al principio
     if df_compras.empty:
         df_compras = pd.DataFrame(columns=["Fecha", "Insumo", "Precio", "Unidades", "Total"])
     if df_ventas.empty:
         df_ventas = pd.DataFrame(columns=["Fecha", "Producto", "Precio", "Unidades", "Total"])
 
 except Exception as e:
-    st.error(f"Error al conectar con Google Sheets. Revisa los secretos de Streamlit. Detalle: {e}")
+    st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
 
 # Menú lateral
@@ -61,7 +58,6 @@ elif menu == "Registrar Compra":
             total_gasto = precio * unidades
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            # Preparamos la nueva fila
             nueva_fila = pd.DataFrame([{
                 "Fecha": fecha_actual,
                 "Insumo": insumo,
@@ -70,7 +66,6 @@ elif menu == "Registrar Compra":
                 "Total": total_gasto
             }])
             
-            # Añadimos la fila al DataFrame existente y actualizamos Google Sheets
             df_actualizado = pd.concat([df_compras, nueva_fila], ignore_index=True)
             conn.update(worksheet="compras", data=df_actualizado)
             
@@ -92,7 +87,6 @@ elif menu == "Registrar Venta":
             total_ingreso = precio_v * unidades_v
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            # Preparamos la nueva fila
             nueva_fila_v = pd.DataFrame([{
                 "Fecha": fecha_actual,
                 "Producto": producto,
@@ -101,7 +95,6 @@ elif menu == "Registrar Venta":
                 "Total": total_ingreso
             }])
             
-            # Añadimos la fila al DataFrame existente y actualizamos Google Sheets
             df_ventas_actualizado = pd.concat([df_ventas, nueva_fila_v], ignore_index=True)
             conn.update(worksheet="ventas", data=df_ventas_actualizado)
             
